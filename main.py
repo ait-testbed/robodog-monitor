@@ -35,7 +35,7 @@ def create_db_table():
 create_db_table()
 
 #  MQTT Client and Message Handling 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print("Connected to MQTT Broker!")
         client.subscribe(topic)
@@ -69,7 +69,7 @@ def on_message(client, userdata, msg):
         print(f"Error processing message: {e}")
 
 def connect_mqtt():
-    client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, client_id)
+    client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2, client_id)
     client.on_connect = on_connect
     client.on_message = on_message
     client.connect(broker, port)
