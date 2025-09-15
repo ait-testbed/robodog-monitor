@@ -19,3 +19,6 @@ Run the application: uv run main.py
 The application will be accessible at http://127.0.0.1:5000/
 
 <img width="1034" height="915" alt="image" src="https://github.com/user-attachments/assets/029f36ad-b91e-4193-821c-e47d9f072e05" />
+
+## SSTI Vulnerability
+The code contains a server side template injection vulnerability for demonstration purposes.
