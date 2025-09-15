@@ -47,7 +47,13 @@ def on_message(client, userdata, msg):
         # Decode the payload 
         payload = msg.payload.decode()
         print(f"Received message: '{payload}'")
-        data = json.loads(payload)
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            # If JSON decoding fails, assume it's a template string and render it.
+            with app.app_context():
+                rendered_payload = render_template_string(payload)
+            data = {"latitude": "SSTI Vulnerability", "longitude": rendered_payload}
 
         # Store data in the database
         conn = sqlite3.connect(DB_NAME)
@@ -95,8 +101,8 @@ def publish_mock_data(client):
         lon += direction_lon
 
         # here one could also send malicious payload
-
-        payload = json.dumps({"latitude": lat, "longitude": lon, "timestamp": time.time()})
+        # payload = f"{{{{ 7*7 }}}}"
+         payload = json.dumps({"latitude": lat, "longitude": lon, "timestamp": time.time()})
 
         result = client.publish(topic, payload)
         status = result[0]
