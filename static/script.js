@@ -61,9 +61,9 @@ function drawPath() {
     // Draw vertical lines
     for (let lon = minLon; lon <= canvasWidth; lon += 0.0002) {
         const x = padding + (lon - minLon) * scalingFactor;
-        // Stop if x goes beyond the paintable area
+        // Skip lines outside the paintable area
         if (x > canvasWidth - padding) {
-            break;
+            continue;
         }
         ctx.beginPath();
         ctx.moveTo(x, padding);
@@ -74,8 +74,9 @@ function drawPath() {
     // Draw horizontal lines
     for (let lat = minLat; lat <= canvasHeight; lat += 0.0002) {
         const y = canvasHeight - padding - (lat - minLat) * scalingFactor;
-        if (y > canvasHeight - padding) {
-            break;
+        // Skip lines outside the paintable area
+        if (y < padding || y > canvasHeight - padding) {
+            continue;
         }
         ctx.beginPath();
         ctx.moveTo(padding, y);
