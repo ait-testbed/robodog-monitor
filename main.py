@@ -102,7 +102,7 @@ def publish_mock_data(client):
 
         # here one could also send malicious payload
         # payload = f"{{{{ 7*7 }}}}"
-         payload = json.dumps({"latitude": lat, "longitude": lon, "timestamp": time.time()})
+        payload = json.dumps({"latitude": lat, "longitude": lon, "timestamp": time.time()})
 
         result = client.publish(topic, payload)
         status = result[0]
