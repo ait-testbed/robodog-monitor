@@ -14,13 +14,13 @@ from paho.mqtt import client as mqtt_client
 app = Flask(__name__)
 
 # MQTT broker settings using a public test broker, also possible bokers like HiveMQ or CloudMQTT: 
-broker = 'lorawan.newsroom.local'
+#broker = 'lorawan.newsroom.local'
 port = 1883
-topic = "#"
+#topic = "#"
 #topic = "v3/testapplication/"
-#topic = "robodog/location"
+topic = "robodog/location"
 
-#broker = 'test.mosquitto.org'
+broker = 'localhost'
 #port = 1883
 #topic = "robodog/location"
 client_id = f'python-mqtt-{random.randint(0, 1000)}'
@@ -86,44 +86,49 @@ def on_message(client, userdata, msg):
 
         # Process and store raw message for logging and debugging
 
-        frm_payload = data['uplink_message']['frm_payload']
-        b64d_payload = base64.b64decode(frm_payload)
-        message_string = b64d_payload.decode()
+        try:
+            frm_payload = data['uplink_message']['frm_payload']
+            b64d_payload = base64.b64decode(frm_payload)
+            message_string = b64d_payload.decode()
 
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO messages (timestamp, message) VALUES (?,?)",
-            (time.time(), message_string)
-            )
-        conn.commit()
-        conn.close()
-        
-        # Process positioning data
-        lat_part = int.from_bytes(bytearray(b64d_payload[:4]))
-        lon_part = int.from_bytes(bytearray(b64d_payload[4:8]))
-        
-        # These checks and magic numbers are derived from the documentation
-        # of the LoRaWAN GPS Tracker and how it encodes its data
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO messages (timestamp, message) VALUES (?,?)",
+                (time.time(), message_string)
+                )
+            conn.commit()
+            conn.close()
 
-        if not (lat_part & 0x80000000):
-            latitude = lat_part / 1000000.0
-            if abs(latitude) > 90:
-                raise ValueError('Tracker sent bad latitude')
+            # Process positioning data
+            lat_part = int.from_bytes(bytearray(b64d_payload[:4]))
+            lon_part = int.from_bytes(bytearray(b64d_payload[4:8]))
 
-        else:
-            raise ValueError('Tracker sent frame missing latitude')
+            # These checks and magic numbers are derived from the documentation
+            # of the LoRaWAN GPS Tracker and how it encodes its data
 
-        if (lon_part & 0x80000000):
-            longitude = (lon_part - 0x100000000) / 1000000.0
-            if abs(longitude) > 180:
-                raise ValueError('Tracker sent bad longitude')
+            if not (lat_part & 0x80000000):
+                latitude = lat_part / 1000000.0
+                if abs(latitude) > 90:
+                    raise ValueError('Tracker sent bad latitude')
 
-        else:
-            raise ValueError('Tracker sent frame missing longitude')
+            else:
+                raise ValueError('Tracker sent frame missing latitude')
 
-        print('latitude: ', latitude)
-        print('longitude: ', longitude)
+            if (lon_part & 0x80000000):
+                longitude = (lon_part - 0x100000000) / 1000000.0
+                if abs(longitude) > 180:
+                    raise ValueError('Tracker sent bad longitude')
+
+            else:
+                raise ValueError('Tracker sent frame missing longitude')
+
+            print('latitude: ', latitude)
+            print('longitude: ', longitude)
+        except KeyError:
+            # Mock data format
+            latitude = data['latitude']
+            longitude = data['longitude']
 
         # Store data in the database
         conn = sqlite3.connect(DB_NAME)
@@ -184,6 +189,61 @@ def publish_mock_data(client):
         # Publish every 3 seconds
         time.sleep(3)
 
+# Structured lap data for rectangle patrol with periodic deviation
+def publish_dog_lap_data(client):
+    # Rectangle corners: SW → NW → NE → SE (SW is the starting point)
+    sw = (48.2075, 16.3728)
+    nw = (48.2112, 16.3728)
+    ne = (48.2112, 16.3778)
+    se = (48.2075, 16.3778)
+    rect = [sw, nw, ne, se]
+
+    # Camera 5 - deviation point outside the rectangle (west side)
+    deviation_point = (48.2094, 16.3715)
+
+    def walk(start, end, steps):
+        """Yield `steps` evenly spaced points from start to end (exclusive of start, inclusive of end)."""
+        for i in range(1, steps + 1):
+            lat = start[0] + (end[0] - start[0]) * i / steps
+            lon = start[1] + (end[1] - start[1]) * i / steps
+            yield (lat, lon)
+
+    def publish_point(point):
+        payload = json.dumps({"latitude": point[0], "longitude": point[1], "timestamp": time.time()})
+        result = client.publish(topic, payload)
+        if result[0] != 0:
+            print(f"Failed to send message to topic {topic}")
+        time.sleep(2)
+
+    lap = 0
+    while True:
+        lap += 1
+
+        if lap % 10 == 0:
+            # Deviation lap: 1→5→2, then continue normally 2→3→4→1
+            for point in walk(sw, deviation_point, 8):
+                publish_point(point)
+            for point in walk(deviation_point, nw, 8):
+                publish_point(point)
+            for point in walk(nw, ne, 16):
+                publish_point(point)
+            for point in walk(ne, se, 8):
+                publish_point(point)
+            for point in walk(se, sw, 16):
+                publish_point(point)
+        else:
+            # Normal lap: 1→2→3→4→1
+            # SW→NW and NE→SE are the short NS sides (8 steps)
+            # NW→NE and SE→SW are the long EW sides (16 steps)
+            for point in walk(sw, nw, 8):
+                publish_point(point)
+            for point in walk(nw, ne, 16):
+                publish_point(point)
+            for point in walk(ne, se, 8):
+                publish_point(point)
+            for point in walk(se, sw, 16):
+                publish_point(point)
+
 @app.route('/')
 def index():
     conn = sqlite3.connect(DB_NAME)
@@ -232,10 +292,11 @@ def get_data():
     """Endpoint for fetching the last 100 coordinates as JSON."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    #cursor.execute("SELECT latitude, longitude FROM coordinates ORDER BY timestamp ASC LIMIT 100")
-    cursor.execute("SELECT message, timestamp FROM messages ORDER BY timestamp DESC LIMIT 100")
-    #messages = cursor.fetchone()
-    data = [{"message": row[0], "timestamp": row[1]} for row in cursor.fetchall()]
+    cursor.execute("SELECT latitude, longitude FROM coordinates ORDER BY timestamp ASC LIMIT 100")
+    # cursor.execute("SELECT message, timestamp FROM messages ORDER BY timestamp DESC LIMIT 100")
+    # data = [{"message": row[0], "timestamp": row[1]} for row in cursor.fetchall()]
+
+    data = [{"latitude": row[0], "longitude": row[1]} for row in cursor.fetchall()]
     conn.close()
     return jsonify(data)
 
@@ -252,10 +313,10 @@ if __name__ == '__main__':
     mqtt_client = connect_mqtt()
     mqtt_client.loop_start()
 
-    # Start the mock data publishing thread
-    #mock_thread = threading.Thread(target=publish_mock_data, args=(mqtt_client,))
-    #mock_thread.daemon = True
-    #mock_thread.start()
+    # Start the lap data publishing thread
+    mock_thread = threading.Thread(target=publish_dog_lap_data, args=(mqtt_client,))
+    mock_thread.daemon = True
+    mock_thread.start()
     
     # Run the Flask web server
     app.run(host='0.0.0.0', debug=True, use_reloader=False)
