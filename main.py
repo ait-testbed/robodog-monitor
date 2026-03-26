@@ -345,8 +345,10 @@ def camera_feed():
 if __name__ == '__main__':
 
     # Set up the MQTT client and connect
-    mqtt_client = connect_mqtt()
-    mqtt_client.loop_start()
+    #mqtt_client = connect_mqtt()
+    #mqtt_client.loop_start()
+
+    mqtt_client = []
 
     # Start the lap data publishing thread
     # if fake is True: don't publish to MQTT, but write directly into the SQL db
