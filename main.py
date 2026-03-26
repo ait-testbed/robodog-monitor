@@ -14,13 +14,15 @@ from paho.mqtt import client as mqtt_client
 app = Flask(__name__)
 
 # MQTT broker settings using a public test broker, also possible bokers like HiveMQ or CloudMQTT: 
-#broker = 'lorawan.newsroom.local'
+broker = 'lorawan.newsroom.local'
 port = 1883
-#topic = "#"
-#topic = "v3/testapplication/"
-topic = "robodog/location"
 
-broker = 'localhost'
+#topic = "#"
+sub_topic = 'v3/application01/devices/tracker01/up'
+push_topic = 'v3/application01/devices/tracker01/down/push'
+#topic = "v3/testapplication/"
+#topic = "robodog/location"
+
 #port = 1883
 #topic = "robodog/location"
 client_id = f'python-mqtt-{random.randint(0, 1000)}'
@@ -64,15 +66,20 @@ def on_connect(client, userdata, flags, rc, properties=auth):
 #def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         print("Connected to MQTT Broker!")
-        client.subscribe(topic)
+        client.subscribe(sub_topic)
     else:
         print(f"Failed to connect, return code {rc}")
 
 def on_message(client, userdata, msg):
     try:
         # Decode the payload 
-        payload = msg.payload.decode()
-        #print(f"Received message: '{payload}'")
+        #print("MQTT message topic", msg.topic)
+        payload = msg.payload
+        decoded = payload.decode()
+        print(f"Received payload: '{payload}'")
+        print(f"Received payload.hex(): '{payload.hex()}'")
+        print(f"Received payload decoded: '{decoded}'")
+        payload = decoded
 
         try:
             data = json.loads(payload)
@@ -89,7 +96,9 @@ def on_message(client, userdata, msg):
         try:
             frm_payload = data['uplink_message']['frm_payload']
             b64d_payload = base64.b64decode(frm_payload)
-            message_string = b64d_payload.decode()
+            #message_string = b64d_payload.decode()
+            message_string = b64d_payload
+            print('b64d_payload: ', b64d_payload)
 
             conn = sqlite3.connect(DB_NAME)
             cursor = conn.cursor()
@@ -126,6 +135,7 @@ def on_message(client, userdata, msg):
             print('latitude: ', latitude)
             print('longitude: ', longitude)
         except KeyError:
+            print("Key Error while trying to decode MQTT data. Data not in json format/from GPS tracker?")
             # Mock data format
             latitude = data['latitude']
             longitude = data['longitude']
@@ -153,7 +163,7 @@ def connect_mqtt():
     return client
 
 # Mock Data Generation (Robot Simulator) 
-def publish_mock_data(client):
+def publish_mock_data(client, fake=False):
     # arbitrary start coordinates
     lat = 48.2082
     lon = 16.3738
@@ -180,17 +190,29 @@ def publish_mock_data(client):
         # here one could also send malicious payload
         # payload = f"{{{{ 7*7 }}}}"
         payload = json.dumps({"latitude": lat, "longitude": lon, "timestamp": time.time()})
+        if fake:
+            # Store data in the database
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute(
+            "INSERT INTO coordinates (timestamp, latitude, longitude) VALUES (?, ?, ?)",
+            #(time.time(), data['latitude'], data['longitude'])
+            (time.time(), lat, lon)
+            )
+            conn.commit()
+            conn.close()
 
-        result = client.publish(topic, payload)
-        status = result[0]
-        if status != 0:
-            print(f"Failed to send message to topic {topic}")
+        else:
+            result = client.publish(push_topic, payload)
+            status = result[0]
+            if status != 0:
+                print(f"Failed to send message to topic {topic}")
 
         # Publish every 3 seconds
         time.sleep(3)
 
 # Structured lap data for rectangle patrol with periodic deviation
-def publish_dog_lap_data(client):
+def publish_dog_lap_data(client, fake=False):
     # Rectangle corners: SW → NW → NE → SE (SW is the starting point)
     sw = (48.2075, 16.3728)
     nw = (48.2112, 16.3728)
@@ -210,9 +232,22 @@ def publish_dog_lap_data(client):
 
     def publish_point(point):
         payload = json.dumps({"latitude": point[0], "longitude": point[1], "timestamp": time.time()})
-        result = client.publish(topic, payload)
-        if result[0] != 0:
-            print(f"Failed to send message to topic {topic}")
+        if fake:
+            # Store data in the database
+            conn = sqlite3.connect(DB_NAME)
+            cursor = conn.cursor()
+            cursor.execute(
+            "INSERT INTO coordinates (timestamp, latitude, longitude) VALUES (?, ?, ?)",
+            #(time.time(), data['latitude'], data['longitude'])
+            (time.time(), point[0], point[1])
+                          )
+            conn.commit()
+            conn.close()
+  
+        else:
+            result = client.publish(push_topic, payload)
+            if result[0] != 0:
+                print(f"Failed to send message to topic {topic}")
         time.sleep(2)
 
     lap = 0
@@ -314,9 +349,12 @@ if __name__ == '__main__':
     mqtt_client.loop_start()
 
     # Start the lap data publishing thread
-    mock_thread = threading.Thread(target=publish_dog_lap_data, args=(mqtt_client,))
+    # if fake is True: don't publish to MQTT, but write directly into the SQL db
+    fake = True
+    mock_thread = threading.Thread(target=publish_dog_lap_data, args=(mqtt_client,fake))
     mock_thread.daemon = True
     mock_thread.start()
+
     
     # Run the Flask web server
     app.run(host='0.0.0.0', debug=True, use_reloader=False)
