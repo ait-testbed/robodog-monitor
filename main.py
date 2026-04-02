@@ -248,13 +248,13 @@ def publish_dog_lap_data(client, fake=False):
             result = client.publish(push_topic, payload)
             if result[0] != 0:
                 print(f"Failed to send message to topic {topic}")
-        time.sleep(2)
+        time.sleep(1)
 
     lap = 0
     while True:
         lap += 1
 
-        if lap % 10 == 0:
+        if lap % 3 == 0:
             # Deviation lap: 1→5→2, then continue normally 2→3→4→1
             for point in walk(sw, deviation_point, 8):
                 publish_point(point)
@@ -327,11 +327,13 @@ def get_data():
     """Endpoint for fetching the last 100 coordinates as JSON."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT latitude, longitude FROM coordinates ORDER BY timestamp ASC LIMIT 100")
+    cursor.execute("SELECT latitude, longitude FROM coordinates ORDER BY timestamp DESC LIMIT 10")
     # cursor.execute("SELECT message, timestamp FROM messages ORDER BY timestamp DESC LIMIT 100")
     # data = [{"message": row[0], "timestamp": row[1]} for row in cursor.fetchall()]
+    rows = cursor.fetchall()
+    rows.reverse()
 
-    data = [{"latitude": row[0], "longitude": row[1]} for row in cursor.fetchall()]
+    data = [{"latitude": row[0], "longitude": row[1]} for row in rows]
     conn.close()
     return jsonify(data)
 
